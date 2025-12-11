@@ -1,6 +1,6 @@
 {
-    "title": "Flux Krea",
-    "description": "Flux 모델을 사용한 이미지 생성 및 편집을 위한 RunPod Hub",
+    "title": "Flux Krea, Z-image",
+    "description": "Flux Krea and Z-image are models that can generate and edit images using Flux and Z-image.",
     "type": "serverless",
     "category": "image",
     "iconUrl": "https://github.com/wlsdml1114/Engui_Studio/blob/main/assets/logo.png?raw=true",
@@ -10,9 +10,9 @@
       "containerDiskInGb": 30,
   
       "gpuCount": 1,
-      "gpuIds": "ADA_24",
+      "gpuIds": "ADA_24,ADA_32_PRO",
       "allowedCudaVersions": [
-        "12.9", "12.8"
+        "12.8"
       ]
     }
 }

@@ -20,13 +20,16 @@ RUN cd /ComfyUI/custom_nodes && \
     pip install -r requirements.txt
 
 # wget을 사용하여 모델 다운로드 (인증 불필요)
-RUN wget https://huggingface.co/Comfy-Org/FLUX.1-Krea-dev_ComfyUI/resolve/main/split_files/diffusion_models/flux1-krea-dev_fp8_scaled.safetensors -O /ComfyUI/models/unet/flux1-krea-dev_fp8_scaled.safetensors
-RUN wget https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors -O /ComfyUI/models/clip/clip_l.safetensors
-RUN wget https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn_scaled.safetensors -O /ComfyUI/models/clip/t5xxl_fp8_e4m3fn_scaled.safetensors
-RUN wget https://huggingface.co/Comfy-Org/Lumina_Image_2.0_Repackaged/resolve/main/split_files/vae/ae.safetensors -O /ComfyUI/models/vae/ae.safetensors
+RUN wget https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors -O /ComfyUI/models/unet/z_image_turbo_bf16.safetensors
+RUN wget https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors -O /ComfyUI/models/clip/qwen_3_4b.safetensors
+RUN wget https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors -O /ComfyUI/models/vae/ae.safetensors
+RUN mkdir -p /ComfyUI/models/model_patches && \
+    wget https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union/resolve/main/Z-Image-Turbo-Fun-Controlnet-Union.safetensors -O /ComfyUI/models/model_patches/Z-Image-Turbo-Fun-Controlnet-Union.safetensors
 
 
 COPY . .
+RUN mkdir -p /ComfyUI/user/default/ComfyUI-Manager
+COPY config.ini /ComfyUI/user/default/ComfyUI-Manager/config.ini
 COPY extra_model_paths.yaml /ComfyUI/extra_model_paths.yaml
 RUN chmod +x /entrypoint.sh
 

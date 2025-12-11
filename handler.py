@@ -9,6 +9,8 @@ import logging
 import urllib.request
 import urllib.parse
 import binascii # Base64 에러 처리를 위해 import
+import subprocess
+import time
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -16,35 +18,79 @@ logger = logging.getLogger(__name__)
 
 server_address = os.getenv('SERVER_ADDRESS', '127.0.0.1')
 client_id = str(uuid.uuid4())
-def save_data_if_base64(data_input, temp_dir, output_filename):
-    """
-    입력 데이터가 Base64 문자열인지 확인하고, 맞다면 파일로 저장 후 경로를 반환합니다.
-    만약 일반 경로 문자열이라면 그대로 반환합니다.
-    """
-    # 입력값이 문자열이 아니면 그대로 반환
-    if not isinstance(data_input, str):
-        return data_input
 
+def to_nearest_multiple_of_16(value):
+    """주어진 값을 가장 가까운 16의 배수로 보정, 최소 16 보장"""
     try:
-        # Base64 문자열은 디코딩을 시도하면 성공합니다.
-        decoded_data = base64.b64decode(data_input)
+        numeric_value = float(value)
+    except Exception:
+        raise Exception(f"width/height 값이 숫자가 아닙니다: {value}")
+    adjusted = int(round(numeric_value / 16.0) * 16)
+    if adjusted < 16:
+        adjusted = 16
+    return adjusted
+
+def process_input(input_data, temp_dir, output_filename, input_type):
+    """입력 데이터를 처리하여 파일 경로를 반환하는 함수"""
+    if input_type == "path":
+        # 경로인 경우 그대로 반환
+        logger.info(f"📁 경로 입력 처리: {input_data}")
+        return input_data
+    elif input_type == "url":
+        # URL인 경우 다운로드
+        logger.info(f"🌐 URL 입력 처리: {input_data}")
+        os.makedirs(temp_dir, exist_ok=True)
+        file_path = os.path.abspath(os.path.join(temp_dir, output_filename))
+        return download_file_from_url(input_data, file_path)
+    elif input_type == "base64":
+        # Base64인 경우 디코딩하여 저장
+        logger.info(f"🔢 Base64 입력 처리")
+        return save_base64_to_file(input_data, temp_dir, output_filename)
+    else:
+        raise Exception(f"지원하지 않는 입력 타입: {input_type}")
+
+        
+def download_file_from_url(url, output_path):
+    """URL에서 파일을 다운로드하는 함수"""
+    try:
+        # wget을 사용하여 파일 다운로드
+        result = subprocess.run([
+            'wget', '-O', output_path, '--no-verbose', url
+        ], capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            logger.info(f"✅ URL에서 파일을 성공적으로 다운로드했습니다: {url} -> {output_path}")
+            return output_path
+        else:
+            logger.error(f"❌ wget 다운로드 실패: {result.stderr}")
+            raise Exception(f"URL 다운로드 실패: {result.stderr}")
+    except subprocess.TimeoutExpired:
+        logger.error("❌ 다운로드 시간 초과")
+        raise Exception("다운로드 시간 초과")
+    except Exception as e:
+        logger.error(f"❌ 다운로드 중 오류 발생: {e}")
+        raise Exception(f"다운로드 중 오류 발생: {e}")
+
+
+def save_base64_to_file(base64_data, temp_dir, output_filename):
+    """Base64 데이터를 파일로 저장하는 함수"""
+    try:
+        # Base64 문자열 디코딩
+        decoded_data = base64.b64decode(base64_data)
         
         # 디렉토리가 존재하지 않으면 생성
         os.makedirs(temp_dir, exist_ok=True)
         
-        # 디코딩에 성공하면, 임시 파일로 저장합니다.
+        # 파일로 저장
         file_path = os.path.abspath(os.path.join(temp_dir, output_filename))
-        with open(file_path, 'wb') as f: # 바이너리 쓰기 모드('wb')로 저장
+        with open(file_path, 'wb') as f:
             f.write(decoded_data)
         
-        # 저장된 파일의 경로를 반환합니다.
-        print(f"✅ Base64 입력을 '{file_path}' 파일로 저장했습니다.")
+        logger.info(f"✅ Base64 입력을 '{file_path}' 파일로 저장했습니다.")
         return file_path
-
-    except (binascii.Error, ValueError):
-        # 디코딩에 실패하면, 일반 경로로 간주하고 원래 값을 그대로 반환합니다.
-        print(f"➡️ '{data_input}'은(는) 파일 경로로 처리합니다.")
-        return data_input
+    except (binascii.Error, ValueError) as e:
+        logger.error(f"❌ Base64 디코딩 실패: {e}")
+        raise Exception(f"Base64 디코딩 실패: {e}")
     
 def queue_prompt(prompt):
     url = f"http://{server_address}:8188/prompt"
@@ -99,66 +145,110 @@ def get_images(ws, prompt):
     return output_images
 
 def load_workflow(workflow_path):
-    with open(workflow_path, 'r') as file:
+    """워크플로우 파일을 로드하는 함수"""
+    # 상대 경로인 경우 현재 파일 기준으로 절대 경로 변환
+    if not os.path.isabs(workflow_path):
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        workflow_path = os.path.join(current_dir, workflow_path)
+    with open(workflow_path, 'r', encoding='utf-8') as file:
         return json.load(file)
 
 def handler(job):
     job_input = job.get("input", {})
 
     logger.info(f"Received job input: {job_input}")
+    task_id = f"task_{uuid.uuid4()}"
 
-    # LoRA 개수에 따라 적절한 워크플로우 파일 선택
-    lora_list = job_input.get("lora", [])
-    lora_count = len(lora_list)
-    
-    if lora_count == 0:
-        workflow_file = "/flux_krea_dev_api_nolora.json"
-    elif lora_count == 1:
-        workflow_file = "/flux_krea_dev_api_1lora.json"
-    elif lora_count == 2:
-        workflow_file = "/flux_krea_dev_api_2lora.json"
-    elif lora_count == 3:
-        workflow_file = "/flux_krea_dev_api_3lora.json"
+    # condition 이미지 입력 처리 (condition_image, condition_image_path, condition_image_url, condition_image_base64 중 하나만 사용)
+    condition_image_path = None
+    if "condition_image" in job_input:
+        # condition_image 파라미터가 제공된 경우, 자동으로 타입 감지
+        condition_image_data = job_input["condition_image"]
+        if isinstance(condition_image_data, str):
+            if condition_image_data.startswith("http://") or condition_image_data.startswith("https://"):
+                condition_image_path = process_input(condition_image_data, task_id, "condition_image.jpg", "url")
+            elif os.path.exists(condition_image_data) or condition_image_data.startswith("/"):
+                condition_image_path = process_input(condition_image_data, task_id, "condition_image.jpg", "path")
+            else:
+                # Base64로 간주
+                condition_image_path = process_input(condition_image_data, task_id, "condition_image.jpg", "base64")
+        else:
+            raise Exception("condition_image 파라미터는 문자열이어야 합니다.")
+    elif "condition_image_path" in job_input:
+        condition_image_path = process_input(job_input["condition_image_path"], task_id, "condition_image.jpg", "path")
+    elif "condition_image_url" in job_input:
+        condition_image_path = process_input(job_input["condition_image_url"], task_id, "condition_image.jpg", "url")
+    elif "condition_image_base64" in job_input:
+        condition_image_path = process_input(job_input["condition_image_base64"], task_id, "condition_image.jpg", "base64")
+
+    # 워크플로우 파일 선택 (condition_image가 있으면 control 워크플로우 사용)
+    if condition_image_path:
+        workflow_file = "workflow/z_image_control.json"
+        logger.info(f"Using control workflow: {workflow_file}")
     else:
-        logger.warning(f"LoRA 개수가 {lora_count}개입니다. 최대 3개까지만 지원됩니다. 3개로 제한합니다.")
-        lora_count = 3
-        workflow_file = "/flux_krea_dev_api_3lora.json"
-        lora_list = lora_list[:3]  # 처음 3개만 사용
+        workflow_file = "workflow/z_image.json"
+        logger.info(f"Using text-only workflow: {workflow_file}")
 
-    logger.info(f"Loading workflow: {workflow_file} with {lora_count} LoRAs")
     prompt = load_workflow(workflow_file)
 
-    # 기본 설정
-    prompt["45"]["inputs"]["text"] = job_input["prompt"]
-    prompt["31"]["inputs"]["seed"] = job_input["seed"]
-    prompt["31"]["inputs"]["cfg"] = job_input["guidance"]
-    prompt["27"]["inputs"]["width"] = job_input["width"]
-    prompt["27"]["inputs"]["height"] = job_input["height"]
+    # 공통 설정
+    prompt_text = job_input.get("prompt", "")
+    seed = job_input.get("seed", 533303727624653)
+    steps = job_input.get("steps", 9)
+    cfg = job_input.get("cfg", 1.0)
+    width = job_input.get("width", 1024)
+    height = job_input.get("height", 1024)
+    negative_prompt = job_input.get("negative_prompt", "")
     
-    # 모델명이 입력으로 들어온 경우 38번 노드의 모델명 변경
-    if "model" in job_input:
-        prompt["38"]["inputs"]["unet_name"] = job_input["model"]
-        logger.info(f"Model changed to: {job_input['model']}")
-    
-    # LoRA 설정 적용
-    if lora_count > 0:
-        # LoRA 노드 ID 매핑 (각 워크플로우에서 LoRA 노드 ID가 다름)
-        lora_node_ids = {
-            1: ["52"],
-            2: ["52", "55"], 
-            3: ["52", "55", "56"]
-        }
+    # 해상도(폭/높이) 16배수 보정
+    adjusted_width = to_nearest_multiple_of_16(width)
+    adjusted_height = to_nearest_multiple_of_16(height)
+    if adjusted_width != width:
+        logger.info(f"Width adjusted to nearest multiple of 16: {width} -> {adjusted_width}")
+    if adjusted_height != height:
+        logger.info(f"Height adjusted to nearest multiple of 16: {height} -> {adjusted_height}")
+
+    if condition_image_path:
+        # z_image_control.json 워크플로우 설정
+        # 노드 58: LoadImage (condition 이미지)
+        prompt["58"]["inputs"]["image"] = condition_image_path
         
-        current_lora_nodes = lora_node_ids[lora_count]
+        # 노드 70:45: CLIPTextEncode (프롬프트)
+        prompt["70:45"]["inputs"]["text"] = prompt_text
         
-        for i, (lora_name, weight) in enumerate(lora_list):
-            if i < len(current_lora_nodes):
-                node_id = current_lora_nodes[i]
-                prompt[node_id]["inputs"]["lora_name"] = lora_name
-                prompt[node_id]["inputs"]["strength_model"] = weight
-                prompt[node_id]["inputs"]["strength_clip"] = weight
-                logger.info(f"LoRA {i+1} applied: {lora_name} with weight {weight}")
-    
+        # 노드 70:44: KSampler (seed, steps, cfg)
+        prompt["70:44"]["inputs"]["seed"] = seed
+        prompt["70:44"]["inputs"]["steps"] = steps
+        prompt["70:44"]["inputs"]["cfg"] = cfg
+        
+        # 노드 57: Canny (low_threshold, high_threshold) - 선택적
+        if "canny_low_threshold" in job_input:
+            prompt["57"]["inputs"]["low_threshold"] = job_input["canny_low_threshold"]
+        if "canny_high_threshold" in job_input:
+            prompt["57"]["inputs"]["high_threshold"] = job_input["canny_high_threshold"]
+        
+        # 노드 70:60: QwenImageDiffsynthControlnet (strength) - 선택적
+        if "controlnet_strength" in job_input:
+            prompt["70:60"]["inputs"]["strength"] = job_input["controlnet_strength"]
+        
+        # 노드 70:41: EmptySD3LatentImage는 70:69에서 자동으로 크기를 가져오므로 설정 불필요
+        
+        logger.info(f"Control workflow 설정 완료: condition_image={condition_image_path}, prompt={prompt_text[:50]}...")
+    else:
+        # z_image.json 워크플로우 설정
+        # 노드 45: CLIPTextEncode (프롬프트)
+        prompt["45"]["inputs"]["text"] = prompt_text
+        
+        # 노드 44: KSampler (seed, steps, cfg)
+        prompt["44"]["inputs"]["seed"] = seed
+        prompt["44"]["inputs"]["steps"] = steps
+        prompt["44"]["inputs"]["cfg"] = cfg
+        
+        # 노드 41: EmptySD3LatentImage (width, height)
+        prompt["41"]["inputs"]["width"] = adjusted_width
+        prompt["41"]["inputs"]["height"] = adjusted_height
+        
+        logger.info(f"Text-only workflow 설정 완료: prompt={prompt_text[:50]}...")
 
     ws_url = f"ws://{server_address}:8188/ws?clientId={client_id}"
     logger.info(f"Connecting to WebSocket: {ws_url}")
@@ -183,9 +273,8 @@ def handler(job):
     
     ws = websocket.WebSocket()
     # 웹소켓 연결 시도 (최대 3분)
-    max_attempts = int(180/5)  # 3분 (1초에 한 번씩 시도)
+    max_attempts = int(180/5)  # 3분 (5초에 한 번씩 시도)
     for attempt in range(max_attempts):
-        import time
         try:
             ws.connect(ws_url)
             logger.info(f"웹소켓 연결 성공 (시도 {attempt+1})")
