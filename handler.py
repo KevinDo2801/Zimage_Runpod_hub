@@ -181,10 +181,17 @@ def handler(job):
     elif "condition_image_base64" in job_input:
         condition_image_path = process_input(job_input["condition_image_base64"], task_id, "condition_image.jpg", "base64")
 
-    # 워크플로우 파일 선택 (condition_image가 있으면 control 워크플로우 사용)
+    # LoRA 확인
+    lora_list = job_input.get("lora", [])
+    has_lora = lora_list and len(lora_list) > 0
+    
+    # 워크플로우 파일 선택 (우선순위: condition_image > lora > 기본)
     if condition_image_path:
         workflow_file = "workflow/z_image_control.json"
         logger.info(f"Using control workflow: {workflow_file}")
+    elif has_lora:
+        workflow_file = "workflow/z_image_lora.json"
+        logger.info(f"Using LoRA workflow: {workflow_file}")
     else:
         workflow_file = "workflow/z_image.json"
         logger.info(f"Using text-only workflow: {workflow_file}")
@@ -234,6 +241,33 @@ def handler(job):
         # 노드 70:41: EmptySD3LatentImage는 70:69에서 자동으로 크기를 가져오므로 설정 불필요
         
         logger.info(f"Control workflow 설정 완료: condition_image={condition_image_path}, prompt={prompt_text[:50]}...")
+    elif has_lora:
+        # z_image_lora.json 워크플로우 설정
+        # 노드 58: PrimitiveStringMultiline (프롬프트)
+        prompt["58"]["inputs"]["value"] = prompt_text
+        
+        # 노드 59:13: EmptySD3LatentImage (width, height)
+        prompt["59:13"]["inputs"]["width"] = adjusted_width
+        prompt["59:13"]["inputs"]["height"] = adjusted_height
+        
+        # 노드 59:3: KSampler (seed, steps, cfg)
+        prompt["59:3"]["inputs"]["seed"] = seed
+        prompt["59:3"]["inputs"]["steps"] = steps
+        prompt["59:3"]["inputs"]["cfg"] = cfg
+        
+        # 노드 59:35: LoraLoaderModelOnly (lora_name, strength_model)
+        # 첫 번째 LoRA만 사용 (나중에 여러 개 지원 가능)
+        first_lora = lora_list[0]
+        if isinstance(first_lora, list) and len(first_lora) >= 2:
+            lora_path = first_lora[0]
+            lora_strength = first_lora[1]
+        else:
+            raise Exception("LoRA 형식이 올바르지 않습니다. [파일경로, strength] 형태여야 합니다.")
+        
+        prompt["59:35"]["inputs"]["lora_name"] = lora_path
+        prompt["59:35"]["inputs"]["strength_model"] = lora_strength
+        
+        logger.info(f"LoRA workflow 설정 완료: lora={lora_path}, strength={lora_strength}, prompt={prompt_text[:50]}...")
     else:
         # z_image.json 워크플로우 설정
         # 노드 45: CLIPTextEncode (프롬프트)
