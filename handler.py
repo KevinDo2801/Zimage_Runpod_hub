@@ -11,6 +11,8 @@ import urllib.parse
 import binascii # Base64 에러 처리를 위해 import
 import subprocess
 import time
+import boto3
+from botocore.exceptions import NoCredentialsError
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -92,6 +94,70 @@ def save_base64_to_file(base64_data, temp_dir, output_filename):
         logger.error(f"❌ Base64 디코딩 실패: {e}")
         raise Exception(f"Base64 디코딩 실패: {e}")
     
+def upload_to_r2(image_data, file_name):
+    """
+    이미지 데이터를 Cloudflare R2에 업로드하고 URL을 반환합니다.
+    환경변수 R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME이 필요합니다.
+    """
+    try:
+        account_id = os.environ.get('R2_ACCOUNT_ID')
+        access_key = os.environ.get('R2_ACCESS_KEY_ID')
+        secret_key = os.environ.get('R2_SECRET_ACCESS_KEY')
+        bucket_name = os.environ.get('R2_BUCKET_NAME')
+        custom_domain = os.environ.get('R2_CUSTOM_DOMAIN')
+
+        if not all([account_id, access_key, secret_key, bucket_name]):
+            logger.error("R2 업로드를 위한 환경변수가 설정되지 않았습니다.")
+            return None
+
+        s3_client = boto3.client(
+            's3',
+            endpoint_url=f'https://{account_id}.r2.cloudflarestorage.com',
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key
+        )
+
+        # Base64 디코딩
+        if isinstance(image_data, str):
+            try:
+                image_bytes = base64.b64decode(image_data)
+            except binascii.Error:
+                image_bytes = image_data.encode('utf-8')
+        else:
+            image_bytes = image_data
+
+        s3_client.put_object(
+            Bucket=bucket_name,
+            Key=file_name,
+            Body=image_bytes,
+            ContentType='image/png'
+        )
+        
+        if custom_domain:
+            url = f"{custom_domain}/{file_name}"
+            # http/https prefix check
+            if not url.startswith("http"):
+                 url = f"https://{url}"
+            logger.info(f"✅ R2 업로드 성공 (Public URL): {url}")
+            return url
+        else:
+            # Custom Domain이 없는 경우 Presigned URL 생성 (1시간 유효)
+            try:
+                url = s3_client.generate_presigned_url(
+                    ClientMethod='get_object',
+                    Params={'Bucket': bucket_name, 'Key': file_name},
+                    ExpiresIn=3600
+                )
+                logger.info(f"✅ R2 업로드 성공 (Presigned URL): {url}")
+                return url
+            except Exception as e:
+                logger.error(f"❌ Presigned URL 생성 실패: {e}")
+                return None
+
+    except Exception as e:
+        logger.error(f"❌ R2 업로드 중 오류 발생: {e}")
+        return None
+
 def queue_prompt(prompt):
     url = f"http://{server_address}:8188/prompt"
     logger.info(f"Queueing prompt to: {url}")
@@ -328,7 +394,18 @@ def handler(job):
     # 첫 번째 이미지 반환
     for node_id in images:
         if images[node_id]:
-            return {"image": images[node_id][0]}
+            image_data = images[node_id][0]
+            
+            if job_input.get("return_url", False):
+                # R2 업로드
+                file_name = f"{task_id}.png"
+                image_url = upload_to_r2(image_data, file_name)
+                if image_url:
+                    return {"image_url": image_url}
+                else:
+                     logger.warning("R2 업로드 실패, Base64 이미지를 반환합니다.")
+
+            return {"image": image_data}
     
     return {"error": "이미지를 찾을 수 없습니다."}
 
