@@ -1,160 +1,166 @@
-# Z-Image Turbo for RunPod Serverless
+# Zimage for RunPod Serverless
 
-Template to run **Z-Image Turbo** on RunPod Serverless. Z-Image Turbo is a fast, high-quality image generation model based on the Z-Image architecture.
+RunPod Serverless worker for **Zimage** (ComfyUI-based image generation) with text-to-image, LoRA (including Hugging Face), and control-image (Canny + ControlNet) workflows.
 
-[![Runpod](https://api.runpod.io/badge/wlsdml1114/Flux-krea_Runpod_hub)](https://console.runpod.io/hub/wlsdml1114/Flux-krea_Runpod_hub)
+## Key Features
 
----
+* **Text-to-image**: Prompt-only generation via `workflow/z_image.json`.
+* **LoRA**: Single LoRA via `workflow/z_image_lora.json` — local path or **Hugging Face** repo (cached under `LORA_HF_CACHE_DIR`).
+* **Control image**: Condition image (path / URL / base64) with Canny + ControlNet via `workflow/z_image_control.json`.
+* **Workflow selection**: Automatic by input: condition image → control workflow; LoRA only → LoRA workflow; else text-only.
+* **Output**: Base64 `image` in response, or **Cloudflare R2** upload with `image_url` when `return_url: true` and R2 env configured.
+* **Resolution**: `width` / `height` are normalized to the nearest multiple of 16 (min 16).
 
-## Engui Studio
-
-[![EnguiStudio](https://raw.githubusercontent.com/wlsdml1114/Engui_Studio/main/assets/banner.png)](https://github.com/wlsdml1114/Engui_Studio)
-
-Designed to work with **Engui Studio** (AI model management). Usable via API; Engui Studio adds a UI and broader model support.
-
----
-
-## Features
-
-- **Text-to-image** – prompt-only generation
-- **LoRA** – local files or Hugging Face repos (with disk cache)
-- **ControlNet (Canny)** – structure/edge conditioning
-- **ComfyUI** – workflow-based; workflows in `workflow/`
-- **R2** – optional upload to Cloudflare R2 and return URL
-
----
-
-## Deployment
-
-1. Create a Serverless Endpoint on RunPod from this repo/image.
-2. Send jobs via HTTP POST to the endpoint with JSON `input` as below.
-
----
-
-## Input Parameters
-
-All parameters live under the request `input` object.
+## Input
 
 | Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `prompt` | string | Yes | `""` | Text prompt for the image. |
-| `seed` | integer | No | `533303727624653` | Random seed. |
-| `steps` | integer | No | `9` | Sampling steps. |
-| `cfg` | float | No | `1.0` | Classifier-free guidance scale. |
-| `width` | integer | No | `1024` | Output width (adjusted to multiple of 16). |
-| `height` | integer | No | `1024` | Output height (adjusted to multiple of 16). |
-| `negative_prompt` | string | No | `""` | Negative prompt (workflow-dependent). |
-| `lora` | array | No | `[]` | Local LoRAs: `[[ "path_or_filename", strength ], ...]`. Only first entry used. |
-| `lora_repo` | string | No | - | Hugging Face LoRA repo ID (e.g. `user/repo`). Downloaded and cached under `LORA_HF_CACHE_DIR`. |
-| `lora_scale` | float | No | `1.0` | LoRA strength when using `lora_repo`. |
-| `lora_revision` | string | No | `main` | Git revision for `lora_repo`. |
-| `condition_image` | string | No | - | ControlNet image: URL, file path, or base64. Type auto-detected. |
-| `condition_image_path` | string | No | - | ControlNet image as file path. |
-| `condition_image_url` | string | No | - | ControlNet image as URL. |
-| `condition_image_base64` | string | No | - | ControlNet image as base64. |
-| `controlnet_strength` | float | No | - | ControlNet strength (when using condition image). |
-| `canny_low_threshold` | number | No | - | Canny edge low threshold. |
-| `canny_high_threshold` | number | No | - | Canny edge high threshold. |
-| `return_url` | boolean | No | `false` | If `true`, upload output to R2 and return `image_url` (requires R2 env). |
+| --- | --- | --- | --- | --- |
+| `prompt` | `string` | Yes | `""` | Text prompt for image generation. |
+| `seed` | `integer` | No | `533303727624653` | Random seed. |
+| `steps` | `integer` | No | `9` | Sampling steps. |
+| `cfg` | `float` | No | `1.0` | CFG scale. |
+| `width` | `integer` | No | `1024` | Image width (adjusted to multiple of 16). |
+| `height` | `integer` | No | `1024` | Image height (adjusted to multiple of 16). |
+| `negative_prompt` | `string` | No | `""` | Negative prompt. |
+| `condition_image` | `string` | No | — | Condition image: URL, path, or base64 (auto-detected). |
+| `condition_image_path` | `string` | No | — | Condition image as file path. |
+| `condition_image_url` | `string` | No | — | Condition image as URL. |
+| `condition_image_base64` | `string` | No | — | Condition image as base64. |
+| `canny_low_threshold` | `number` | No | — | Canny edge low threshold (control workflow). |
+| `canny_high_threshold` | `number` | No | — | Canny edge high threshold (control workflow). |
+| `controlnet_strength` | `number` | No | — | ControlNet strength (control workflow). |
+| `lora` | `array` | No | `[]` | LoRA list: `[[path_or_name, strength], ...]` (one used in current workflow). |
+| `lora_repo` | `string` | No | — | Hugging Face LoRA repo ID (e.g. `user/repo`). Uses first `.safetensors` in repo. |
+| `lora_revision` | `string` | No | `main` | Hugging Face repo revision. |
+| `lora_scale` | `float` | No | `1.0` | LoRA strength when using `lora_repo`. |
+| `return_url` | `boolean` | No | `false` | If `true` and R2 configured, return `image_url` instead of base64 `image`. |
 
-**Workflow choice:** `condition_image` (or path/url/base64) → ControlNet; else `lora` or `lora_repo` → LoRA; else text-only.
+**LoRA**
 
----
+* Local/volume: `lora` = `[["/path/to/lora.safetensors", 0.8]]`.
+* Hugging Face: set `lora_repo` (and optionally `lora_revision`, `lora_scale`). Requires `huggingface_hub`. Optional `HF_TOKEN` for private repos. Cache directory: `LORA_HF_CACHE_DIR` (default `/runpod-volume/loras`).
 
-## Environment Variables
+**Request examples**
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `SERVER_ADDRESS` | No | ComfyUI server host (default `127.0.0.1`). |
-| `LORA_HF_CACHE_DIR` | No | Directory for cached HF LoRA files (default `/runpod-volume/loras`). |
-| `HF_TOKEN` | No | Hugging Face token for private/gated LoRA repos. |
-| `R2_ACCOUNT_ID` | For R2 | Cloudflare R2 account ID. |
-| `R2_ACCESS_KEY_ID` | For R2 | R2 access key. |
-| `R2_SECRET_ACCESS_KEY` | For R2 | R2 secret key. |
-| `R2_BUCKET_NAME` | For R2 | R2 bucket name. |
-| `R2_CUSTOM_DOMAIN` | No | Custom domain for public URLs (optional). |
+Text-only:
 
----
-
-## Output
-
-- **Success (base64):** `{ "image": "<base64 string>" }`
-- **Success (R2):** `{ "image_url": "https://..." }` when `return_url` is true and R2 is configured.
-- **Error:** `{ "error": "<message>" }`
-
----
-
-## Example Requests
-
-**Text-to-image**
 ```json
 {
   "input": {
-    "prompt": "A futuristic city in the style of cyberpunk",
+    "prompt": "a beautiful landscape with mountains and a lake",
+    "seed": 12345,
     "width": 1024,
-    "height": 1024,
-    "steps": 10
+    "height": 1024
   }
 }
 ```
 
-**LoRA from Hugging Face (cached)**
-```json
-{
-  "input": {
-    "prompt": "a portrait in custom style",
-    "lora_repo": "username/lora-model-name",
-    "lora_scale": 0.9
-  }
-}
-```
+With Hugging Face LoRA:
 
-**LoRA from local path** (file under ComfyUI loras paths, e.g. `models/loras/` or `/runpod-volume/loras/`)
-```json
-{
-  "input": {
-    "prompt": "a cat in anime style",
-    "lora": [["my_style.safetensors", 0.8]]
-  }
-}
-```
-
-**ControlNet (condition image as URL)**
 ```json
 {
   "input": {
     "prompt": "a beautiful landscape",
-    "condition_image": "https://example.com/edge_map.jpg",
-    "controlnet_strength": 0.8
+    "lora_repo": "username/lora-repo-name",
+    "lora_scale": 0.8
   }
 }
 ```
 
-**ControlNet (condition image as base64)**
+With condition image (URL):
+
 ```json
 {
   "input": {
-    "prompt": "same structure, different scene",
-    "condition_image_base64": "<base64 string>",
-    "controlnet_strength": 0.7,
-    "canny_low_threshold": 0.1,
-    "canny_high_threshold": 0.2
+    "prompt": "same style, different scene",
+    "condition_image_url": "https://example.com/reference.jpg",
+    "controlnet_strength": 0.9
   }
 }
 ```
 
-**Return URL via R2**
+Return image URL via R2:
+
 ```json
 {
   "input": {
-    "prompt": "a sunset over mountains",
+    "prompt": "a cat",
     "return_url": true
   }
 }
 ```
 
----
+## Output
+
+**Success**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `image` | `string` | Base64-encoded image (default). |
+| `image_url` | `string` | Present when `return_url: true` and R2 upload succeeds; public or presigned URL. |
+
+**Error**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `error` | `string` | Error message. |
+
+Example success (base64):
+
+```json
+{
+  "image": "data:image/png;base64,iVBORw0KGgo..."
+}
+```
+
+Example success (R2 URL):
+
+```json
+{
+  "image_url": "https://your-r2-domain.com/temporary/task_xxx.png"
+}
+```
+
+## Cloudflare R2 (optional)
+
+When `return_url: true`, the handler uploads the image to R2 and returns `image_url`. If upload fails, it falls back to base64 `image`.
+
+**Environment variables**
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `R2_ACCOUNT_ID` | Yes | R2 account ID. |
+| `R2_ACCESS_KEY_ID` | Yes | R2 access key. |
+| `R2_SECRET_ACCESS_KEY` | Yes | R2 secret key. |
+| `R2_BUCKET_NAME` | Yes | Bucket name. |
+| `R2_CUSTOM_DOMAIN` hoặc `R2_PUBLIC_URL` | No | Custom domain / public URL cho ảnh (vd. `https://pub-xxx.r2.dev`). Không set thì trả presigned URL (1h). |
+
+Objects are stored under the `temporary/` prefix.
+
+**Test script**
+
+```bash
+python scripts/test_r2_upload.py
+```
+
+Uses `.env` in project root for R2 credentials.
+
+## Workflow files
+
+| File | Use case |
+| --- | --- |
+| `workflow/z_image.json` | Text-only. |
+| `workflow/z_image_lora.json` | Single LoRA (local path or HF cache name). |
+| `workflow/z_image_control.json` | Condition image + Canny + QwenImageDiffsynthControlnet. |
+
+ComfyUI is expected at `SERVER_ADDRESS:8188` (default `127.0.0.1:8188`).
+
+## RunPod setup
+
+1. Create a Serverless Endpoint from this repo.
+2. Set env vars as needed: R2 (if using `return_url`), `HF_TOKEN` (private HF LoRA), `LORA_HF_CACHE_DIR`.
+3. Send HTTP POST requests to the endpoint with `input` as above.
 
 ## License
 
-This project follows the licenses of Z-Image Turbo and ComfyUI.
+See repository and upstream ComfyUI / model licenses.

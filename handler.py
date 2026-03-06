@@ -160,9 +160,13 @@ def save_base64_to_file(base64_data, temp_dir, output_filename):
         logger.error(f"❌ Base64 decoding failed: {e}")
         raise Exception(f"Base64 decoding failed: {e}")
     
+R2_KEY_PREFIX = "temporary"
+
+
 def upload_to_r2(image_data, file_name):
     """
     Upload image data to Cloudflare R2 and return the URL.
+    Objects are stored under key prefix: temporary/
     Requires environment variables R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and R2_BUCKET_NAME.
     """
     try:
@@ -170,11 +174,13 @@ def upload_to_r2(image_data, file_name):
         access_key = os.environ.get('R2_ACCESS_KEY_ID')
         secret_key = os.environ.get('R2_SECRET_ACCESS_KEY')
         bucket_name = os.environ.get('R2_BUCKET_NAME')
-        custom_domain = os.environ.get('R2_CUSTOM_DOMAIN')
+        custom_domain = os.environ.get('R2_CUSTOM_DOMAIN') or os.environ.get('R2_PUBLIC_URL')
 
         if not all([account_id, access_key, secret_key, bucket_name]):
             logger.error("Environment variables for R2 upload are not set.")
             return None
+
+        key = f"{R2_KEY_PREFIX}/{file_name}"
 
         s3_client = boto3.client(
             's3',
@@ -194,14 +200,13 @@ def upload_to_r2(image_data, file_name):
 
         s3_client.put_object(
             Bucket=bucket_name,
-            Key=file_name,
+            Key=key,
             Body=image_bytes,
             ContentType='image/png'
         )
         
         if custom_domain:
-            url = f"{custom_domain}/{file_name}"
-            # http/https prefix check
+            url = f"{custom_domain.rstrip('/')}/{key}"
             if not url.startswith("http"):
                  url = f"https://{url}"
             logger.info(f"✅ R2 upload successful (Public URL): {url}")
@@ -211,7 +216,7 @@ def upload_to_r2(image_data, file_name):
             try:
                 url = s3_client.generate_presigned_url(
                     ClientMethod='get_object',
-                    Params={'Bucket': bucket_name, 'Key': file_name},
+                    Params={'Bucket': bucket_name, 'Key': key},
                     ExpiresIn=3600
                 )
                 logger.info(f"✅ R2 upload successful (Presigned URL): {url}")
