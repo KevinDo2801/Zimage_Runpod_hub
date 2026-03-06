@@ -1,11 +1,14 @@
 import runpod
 from runpod.serverless.utils import rp_upload
 import os
+import re
+import shutil
 import websocket
 import base64
 import json
 import uuid
 import logging
+import tempfile
 import urllib.request
 import urllib.parse
 import binascii # Base64 에러 처리를 위해 import
@@ -16,6 +19,69 @@ from botocore.exceptions import NoCredentialsError
 # Logging configuration
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Hugging Face LoRA cache: repo_id -> (local_path, lora_name for ComfyUI)
+_lora_hf_cache = {}
+LORA_HF_CACHE_DIR = os.getenv("LORA_HF_CACHE_DIR", "/runpod-volume/loras")
+
+
+def _sanitize_lora_filename(repo_id):
+    """Sanitize HF repo_id to a safe filename (no path, no invalid chars)."""
+    name = re.sub(r"[^\w\-.]", "_", repo_id.strip().strip("/"))
+    return name if name.lower().endswith(".safetensors") else f"{name}.safetensors"
+
+
+def get_lora_path_from_hf(repo_id, revision=None, token=None):
+    """
+    Resolve Hugging Face LoRA repo to a local path under LORA_HF_CACHE_DIR.
+    Uses in-memory + on-disk cache: same repo_id returns existing path without re-download.
+    Returns (absolute_path, lora_name) where lora_name is the filename for ComfyUI.
+    """
+    global _lora_hf_cache
+    revision = revision or "main"
+    cache_key = (repo_id, revision)
+    lora_name = _sanitize_lora_filename(repo_id)
+    dest_path = os.path.join(LORA_HF_CACHE_DIR, lora_name)
+
+    if cache_key in _lora_hf_cache and os.path.isfile(_lora_hf_cache[cache_key][0]):
+        logger.info(f"LoRA cache hit (memory): {repo_id}")
+        return _lora_hf_cache[cache_key]
+
+    if os.path.isfile(dest_path):
+        _lora_hf_cache[cache_key] = (dest_path, lora_name)
+        logger.info(f"LoRA cache hit (disk): {repo_id} -> {lora_name}")
+        return (dest_path, lora_name)
+
+    try:
+        from huggingface_hub import list_repo_files, hf_hub_download
+    except ImportError:
+        raise Exception(
+            "LoRA from Hugging Face requires 'huggingface_hub'. "
+            "Install with: pip install huggingface_hub"
+        )
+
+    logger.info(f"Downloading LoRA from Hugging Face: {repo_id} (revision={revision})")
+    os.makedirs(LORA_HF_CACHE_DIR, exist_ok=True)
+    files = list_repo_files(repo_id, revision=revision, token=token)
+    lora_files = [f for f in files if f.lower().endswith(".safetensors")]
+    if not lora_files:
+        raise Exception(f"No .safetensors file found in repo: {repo_id}")
+    first_lora = lora_files[0]
+    with tempfile.TemporaryDirectory(prefix="lora_hf_") as tmp:
+        src = hf_hub_download(
+            repo_id,
+            filename=first_lora,
+            revision=revision,
+            token=token,
+            local_dir=tmp,
+            local_dir_use_symlinks=False,
+        )
+        if not os.path.isfile(src):
+            src = os.path.join(tmp, first_lora)
+        shutil.copy2(src, dest_path)
+    _lora_hf_cache[cache_key] = (dest_path, lora_name)
+    logger.info(f"LoRA cached: {repo_id} -> {dest_path}")
+    return (dest_path, lora_name)
 
 
 server_address = os.getenv('SERVER_ADDRESS', '127.0.0.1')
@@ -247,8 +313,21 @@ def handler(job):
     elif "condition_image_base64" in job_input:
         condition_image_path = process_input(job_input["condition_image_base64"], task_id, "condition_image.jpg", "base64")
 
-    # Check LoRA
+    # Check LoRA: support Hugging Face repo (with cache) or local lora list
     lora_list = job_input.get("lora", [])
+    lora_repo = job_input.get("lora_repo")
+    lora_scale = float(job_input.get("lora_scale", 1.0))
+    if lora_repo:
+        try:
+            _, lora_name = get_lora_path_from_hf(
+                lora_repo,
+                revision=job_input.get("lora_revision"),
+                token=os.environ.get("HF_TOKEN"),
+            )
+            lora_list = [[lora_name, lora_scale]]
+        except Exception as e:
+            logger.error(f"Failed to resolve LoRA from HF: {lora_repo}: {e}")
+            raise
     has_lora = lora_list and len(lora_list) > 0
     
     # Select workflow file (Priority: condition_image > lora > default)
