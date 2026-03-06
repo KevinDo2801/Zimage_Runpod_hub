@@ -1,6 +1,6 @@
 {
-    "title": "Flux Krea, Z-image",
-    "description": "Flux Krea and Z-image are models that can generate and edit images using Flux and Z-image.",
+    "title": "Z-Image Turbo",
+    "description": "Z-Image Turbo is a model that can generate and edit images using Z-Image.",
     "type": "serverless",
     "category": "image",
     "iconUrl": "https://github.com/wlsdml1114/Engui_Studio/blob/main/assets/logo.png?raw=true",
