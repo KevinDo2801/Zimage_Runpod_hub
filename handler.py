@@ -13,7 +13,7 @@ import subprocess
 import time
 import boto3
 from botocore.exceptions import NoCredentialsError
-# 로깅 설정
+# Logging configuration
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -22,82 +22,82 @@ server_address = os.getenv('SERVER_ADDRESS', '127.0.0.1')
 client_id = str(uuid.uuid4())
 
 def to_nearest_multiple_of_16(value):
-    """주어진 값을 가장 가까운 16의 배수로 보정, 최소 16 보장"""
+    """Correct the given value to the nearest multiple of 16, ensuring a minimum of 16"""
     try:
         numeric_value = float(value)
     except Exception:
-        raise Exception(f"width/height 값이 숫자가 아닙니다: {value}")
+        raise Exception(f"width/height values are not numbers: {value}")
     adjusted = int(round(numeric_value / 16.0) * 16)
     if adjusted < 16:
         adjusted = 16
     return adjusted
 
 def process_input(input_data, temp_dir, output_filename, input_type):
-    """입력 데이터를 처리하여 파일 경로를 반환하는 함수"""
+    """Function to process input data and return the file path"""
     if input_type == "path":
-        # 경로인 경우 그대로 반환
-        logger.info(f"📁 경로 입력 처리: {input_data}")
+        # Return path directly
+        logger.info(f"📁 Processing path input: {input_data}")
         return input_data
     elif input_type == "url":
-        # URL인 경우 다운로드
-        logger.info(f"🌐 URL 입력 처리: {input_data}")
+        # Download from URL
+        logger.info(f"🌐 Processing URL input: {input_data}")
         os.makedirs(temp_dir, exist_ok=True)
         file_path = os.path.abspath(os.path.join(temp_dir, output_filename))
         return download_file_from_url(input_data, file_path)
     elif input_type == "base64":
-        # Base64인 경우 디코딩하여 저장
-        logger.info(f"🔢 Base64 입력 처리")
+        # Decode Base64 and save
+        logger.info(f"🔢 Processing Base64 input")
         return save_base64_to_file(input_data, temp_dir, output_filename)
     else:
-        raise Exception(f"지원하지 않는 입력 타입: {input_type}")
+        raise Exception(f"Unsupported input type: {input_type}")
 
         
 def download_file_from_url(url, output_path):
-    """URL에서 파일을 다운로드하는 함수"""
+    """Function to download a file from a URL"""
     try:
-        # wget을 사용하여 파일 다운로드
+        # Download file using wget
         result = subprocess.run([
             'wget', '-O', output_path, '--no-verbose', url
         ], capture_output=True, text=True)
         
         if result.returncode == 0:
-            logger.info(f"✅ URL에서 파일을 성공적으로 다운로드했습니다: {url} -> {output_path}")
+            logger.info(f"✅ Successfully downloaded file from URL: {url} -> {output_path}")
             return output_path
         else:
-            logger.error(f"❌ wget 다운로드 실패: {result.stderr}")
-            raise Exception(f"URL 다운로드 실패: {result.stderr}")
+            logger.error(f"❌ wget download failed: {result.stderr}")
+            raise Exception(f"URL download failed: {result.stderr}")
     except subprocess.TimeoutExpired:
-        logger.error("❌ 다운로드 시간 초과")
-        raise Exception("다운로드 시간 초과")
+        logger.error("❌ Download timeout")
+        raise Exception("Download timeout")
     except Exception as e:
-        logger.error(f"❌ 다운로드 중 오류 발생: {e}")
-        raise Exception(f"다운로드 중 오류 발생: {e}")
+        logger.error(f"❌ Error occurred during download: {e}")
+        raise Exception(f"Error occurred during download: {e}")
 
 
 def save_base64_to_file(base64_data, temp_dir, output_filename):
-    """Base64 데이터를 파일로 저장하는 함수"""
+    """Function to save Base64 data to a file"""
     try:
-        # Base64 문자열 디코딩
+        # Decode Base64 string
         decoded_data = base64.b64decode(base64_data)
         
-        # 디렉토리가 존재하지 않으면 생성
+        # Create directory if it doesn't exist
         os.makedirs(temp_dir, exist_ok=True)
         
-        # 파일로 저장
+        # Save to file
         file_path = os.path.abspath(os.path.join(temp_dir, output_filename))
         with open(file_path, 'wb') as f:
             f.write(decoded_data)
         
-        logger.info(f"✅ Base64 입력을 '{file_path}' 파일로 저장했습니다.")
+        logger.info(f"✅ Saved Base64 input to file '{file_path}'.")
         return file_path
     except (binascii.Error, ValueError) as e:
-        logger.error(f"❌ Base64 디코딩 실패: {e}")
-        raise Exception(f"Base64 디코딩 실패: {e}")
+        logger.error(f"❌ Base64 decoding failed: {e}")
+        raise Exception(f"Base64 decoding failed: {e}")
     
 def upload_to_r2(image_data, file_name):
     """
-    이미지 데이터를 Cloudflare R2에 업로드하고 URL을 반환합니다.
-    환경변수 R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME이 필요합니다.
+    Upload image data to Cloudflare R2 and return the URL.
+    Requires environment variables R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and R2_BUCKET_NAME.
     """
     try:
         account_id = os.environ.get('R2_ACCOUNT_ID')
@@ -107,7 +107,7 @@ def upload_to_r2(image_data, file_name):
         custom_domain = os.environ.get('R2_CUSTOM_DOMAIN')
 
         if not all([account_id, access_key, secret_key, bucket_name]):
-            logger.error("R2 업로드를 위한 환경변수가 설정되지 않았습니다.")
+            logger.error("Environment variables for R2 upload are not set.")
             return None
 
         s3_client = boto3.client(
@@ -138,24 +138,24 @@ def upload_to_r2(image_data, file_name):
             # http/https prefix check
             if not url.startswith("http"):
                  url = f"https://{url}"
-            logger.info(f"✅ R2 업로드 성공 (Public URL): {url}")
+            logger.info(f"✅ R2 upload successful (Public URL): {url}")
             return url
         else:
-            # Custom Domain이 없는 경우 Presigned URL 생성 (1시간 유효)
+            # Generate Presigned URL if no Custom Domain (valid for 1 hour)
             try:
                 url = s3_client.generate_presigned_url(
                     ClientMethod='get_object',
                     Params={'Bucket': bucket_name, 'Key': file_name},
                     ExpiresIn=3600
                 )
-                logger.info(f"✅ R2 업로드 성공 (Presigned URL): {url}")
+                logger.info(f"✅ R2 upload successful (Presigned URL): {url}")
                 return url
             except Exception as e:
-                logger.error(f"❌ Presigned URL 생성 실패: {e}")
+                logger.error(f"❌ Failed to generate Presigned URL: {e}")
                 return None
 
     except Exception as e:
-        logger.error(f"❌ R2 업로드 중 오류 발생: {e}")
+        logger.error(f"❌ Error occurred during R2 upload: {e}")
         return None
 
 def queue_prompt(prompt):
@@ -225,10 +225,10 @@ def handler(job):
     logger.info(f"Received job input: {job_input}")
     task_id = f"task_{uuid.uuid4()}"
 
-    # condition 이미지 입력 처리 (condition_image, condition_image_path, condition_image_url, condition_image_base64 중 하나만 사용)
+    # Process condition image input (use one of condition_image, condition_image_path, condition_image_url, condition_image_base64)
     condition_image_path = None
     if "condition_image" in job_input:
-        # condition_image 파라미터가 제공된 경우, 자동으로 타입 감지
+        # Automatically detect type if condition_image parameter is provided
         condition_image_data = job_input["condition_image"]
         if isinstance(condition_image_data, str):
             if condition_image_data.startswith("http://") or condition_image_data.startswith("https://"):
@@ -236,10 +236,10 @@ def handler(job):
             elif os.path.exists(condition_image_data) or condition_image_data.startswith("/"):
                 condition_image_path = process_input(condition_image_data, task_id, "condition_image.jpg", "path")
             else:
-                # Base64로 간주
+                # Treated as Base64
                 condition_image_path = process_input(condition_image_data, task_id, "condition_image.jpg", "base64")
         else:
-            raise Exception("condition_image 파라미터는 문자열이어야 합니다.")
+            raise Exception("condition_image parameter must be a string.")
     elif "condition_image_path" in job_input:
         condition_image_path = process_input(job_input["condition_image_path"], task_id, "condition_image.jpg", "path")
     elif "condition_image_url" in job_input:
@@ -247,11 +247,11 @@ def handler(job):
     elif "condition_image_base64" in job_input:
         condition_image_path = process_input(job_input["condition_image_base64"], task_id, "condition_image.jpg", "base64")
 
-    # LoRA 확인
+    # Check LoRA
     lora_list = job_input.get("lora", [])
     has_lora = lora_list and len(lora_list) > 0
     
-    # 워크플로우 파일 선택 (우선순위: condition_image > lora > 기본)
+    # Select workflow file (Priority: condition_image > lora > default)
     if condition_image_path:
         workflow_file = "workflow/z_image_control.json"
         logger.info(f"Using control workflow: {workflow_file}")
@@ -264,7 +264,7 @@ def handler(job):
 
     prompt = load_workflow(workflow_file)
 
-    # 공통 설정
+    # Common settings
     prompt_text = job_input.get("prompt", "")
     seed = job_input.get("seed", 533303727624653)
     steps = job_input.get("steps", 9)
@@ -273,7 +273,7 @@ def handler(job):
     height = job_input.get("height", 1024)
     negative_prompt = job_input.get("negative_prompt", "")
     
-    # 해상도(폭/높이) 16배수 보정
+    # Correct resolution (width/height) to multiples of 16
     adjusted_width = to_nearest_multiple_of_16(width)
     adjusted_height = to_nearest_multiple_of_16(height)
     if adjusted_width != width:
@@ -282,73 +282,73 @@ def handler(job):
         logger.info(f"Height adjusted to nearest multiple of 16: {height} -> {adjusted_height}")
 
     if condition_image_path:
-        # z_image_control.json 워크플로우 설정
-        # 노드 58: LoadImage (condition 이미지)
+        # z_image_control.json workflow configuration
+        # Node 58: LoadImage (condition image)
         prompt["58"]["inputs"]["image"] = condition_image_path
         
-        # 노드 70:45: CLIPTextEncode (프롬프트)
+        # Node 70:45: CLIPTextEncode (prompt)
         prompt["70:45"]["inputs"]["text"] = prompt_text
         
-        # 노드 70:44: KSampler (seed, steps, cfg)
+        # Node 70:44: KSampler (seed, steps, cfg)
         prompt["70:44"]["inputs"]["seed"] = seed
         prompt["70:44"]["inputs"]["steps"] = steps
         prompt["70:44"]["inputs"]["cfg"] = cfg
         
-        # 노드 57: Canny (low_threshold, high_threshold) - 선택적
+        # Node 57: Canny (low_threshold, high_threshold) - optional
         if "canny_low_threshold" in job_input:
             prompt["57"]["inputs"]["low_threshold"] = job_input["canny_low_threshold"]
         if "canny_high_threshold" in job_input:
             prompt["57"]["inputs"]["high_threshold"] = job_input["canny_high_threshold"]
         
-        # 노드 70:60: QwenImageDiffsynthControlnet (strength) - 선택적
+        # Node 70:60: QwenImageDiffsynthControlnet (strength) - optional
         if "controlnet_strength" in job_input:
             prompt["70:60"]["inputs"]["strength"] = job_input["controlnet_strength"]
         
-        # 노드 70:41: EmptySD3LatentImage는 70:69에서 자동으로 크기를 가져오므로 설정 불필요
+        # Node 70:41: EmptySD3LatentImage takes size automatically from 70:69, so no setting required
         
-        logger.info(f"Control workflow 설정 완료: condition_image={condition_image_path}, prompt={prompt_text[:50]}...")
+        logger.info(f"Control workflow configuration complete: condition_image={condition_image_path}, prompt={prompt_text[:50]}...")
     elif has_lora:
-        # z_image_lora.json 워크플로우 설정
-        # 노드 58: PrimitiveStringMultiline (프롬프트)
+        # z_image_lora.json workflow configuration
+        # Node 58: PrimitiveStringMultiline (prompt)
         prompt["58"]["inputs"]["value"] = prompt_text
         
-        # 노드 59:13: EmptySD3LatentImage (width, height)
+        # Node 59:13: EmptySD3LatentImage (width, height)
         prompt["59:13"]["inputs"]["width"] = adjusted_width
         prompt["59:13"]["inputs"]["height"] = adjusted_height
         
-        # 노드 59:3: KSampler (seed, steps, cfg)
+        # Node 59:3: KSampler (seed, steps, cfg)
         prompt["59:3"]["inputs"]["seed"] = seed
         prompt["59:3"]["inputs"]["steps"] = steps
         prompt["59:3"]["inputs"]["cfg"] = cfg
         
-        # 노드 59:35: LoraLoaderModelOnly (lora_name, strength_model)
-        # 첫 번째 LoRA만 사용 (나중에 여러 개 지원 가능)
+        # Node 59:35: LoraLoaderModelOnly (lora_name, strength_model)
+        # Use only the first LoRA (multiple support possible later)
         first_lora = lora_list[0]
         if isinstance(first_lora, list) and len(first_lora) >= 2:
             lora_path = first_lora[0]
             lora_strength = first_lora[1]
         else:
-            raise Exception("LoRA 형식이 올바르지 않습니다. [파일경로, strength] 형태여야 합니다.")
+            raise Exception("Invalid LoRA format. Should be [file_path, strength].")
         
         prompt["59:35"]["inputs"]["lora_name"] = lora_path
         prompt["59:35"]["inputs"]["strength_model"] = lora_strength
         
-        logger.info(f"LoRA workflow 설정 완료: lora={lora_path}, strength={lora_strength}, prompt={prompt_text[:50]}...")
+        logger.info(f"LoRA workflow configuration complete: lora={lora_path}, strength={lora_strength}, prompt={prompt_text[:50]}...")
     else:
-        # z_image.json 워크플로우 설정
-        # 노드 45: CLIPTextEncode (프롬프트)
+        # z_image.json workflow configuration
+        # Node 45: CLIPTextEncode (prompt)
         prompt["45"]["inputs"]["text"] = prompt_text
         
-        # 노드 44: KSampler (seed, steps, cfg)
+        # Node 44: KSampler (seed, steps, cfg)
         prompt["44"]["inputs"]["seed"] = seed
         prompt["44"]["inputs"]["steps"] = steps
         prompt["44"]["inputs"]["cfg"] = cfg
         
-        # 노드 41: EmptySD3LatentImage (width, height)
+        # Node 41: EmptySD3LatentImage (width, height)
         prompt["41"]["inputs"]["width"] = adjusted_width
         prompt["41"]["inputs"]["height"] = adjusted_height
         
-        logger.info(f"Text-only workflow 설정 완료: prompt={prompt_text[:50]}...")
+        logger.info(f"Text-only workflow configuration complete: prompt={prompt_text[:50]}...")
 
     ws_url = f"ws://{server_address}:8188/ws?clientId={client_id}"
     logger.info(f"Connecting to WebSocket: {ws_url}")
@@ -387,26 +387,26 @@ def handler(job):
     images = get_images(ws, prompt)
     ws.close()
 
-    # 이미지가 없는 경우 처리
+    # Handle case where no images are generated
     if not images:
-        return {"error": "이미지를 생성할 수 없습니다."}
+        return {"error": "Cannot generate image."}
     
-    # 첫 번째 이미지 반환
+    # Return the first image
     for node_id in images:
         if images[node_id]:
             image_data = images[node_id][0]
             
             if job_input.get("return_url", False):
-                # R2 업로드
+                # R2 upload
                 file_name = f"{task_id}.png"
                 image_url = upload_to_r2(image_data, file_name)
                 if image_url:
                     return {"image_url": image_url}
                 else:
-                     logger.warning("R2 업로드 실패, Base64 이미지를 반환합니다.")
+                     logger.warning("R2 upload failed, returning Base64 image.")
 
             return {"image": image_data}
     
-    return {"error": "이미지를 찾을 수 없습니다."}
+    return {"error": "Image not found."}
 
 runpod.serverless.start({"handler": handler})
