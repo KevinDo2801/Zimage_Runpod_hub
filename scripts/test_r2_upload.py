@@ -1,5 +1,5 @@
 """
-One-off script to test R2 upload. Loads .env from project root and uploads a small file to runpod-hub/temporary/
+One-off script to test R2 upload. Loads .env from project root and uploads a small file to runpod-hub/temporary/zimage/
 """
 import os
 import sys
@@ -32,7 +32,7 @@ if not all([account_id, access_key, secret_key, bucket_name]):
     print("Missing R2_* env vars. Set them in .env or environment.")
     sys.exit(1)
 
-key_prefix = "temporary"
+key_prefix = "temporary/zimage"
 key = f"{key_prefix}/test-upload.txt"
 body = b"R2 upload test from Zimage_Runpod_hub\n"
 
